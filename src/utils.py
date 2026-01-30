@@ -14,19 +14,18 @@ from sklearn.model_selection import cross_val_score, KFold
 from sklearn.ensemble import RandomForestClassifier, BaggingClassifier, AdaBoostClassifier
 
 SEED = 1
+
 clfs = {
-    'MLP' : MLPClassifier(hidden_layer_sizes=(40,20), random_state=SEED), # 13 (variables) -40, 40-20, 20-1
-    'DT' : DecisionTreeClassifier(criterion='gini', random_state=SEED),
-    'KNN' : KNeighborsClassifier(n_neighbors=5, n_jobs=1),
-    'CART': DecisionTreeClassifier(criterion='gini', max_depth=3, random_state=SEED),
-    'ID3': DecisionTreeClassifier(criterion='entropy', max_depth=3, random_state=SEED),  # ID3 ≈ entropie
     'MLP': MLPClassifier(hidden_layer_sizes=(20, 10), random_state=SEED, max_iter=1000),
-    'KNN': KNeighborsClassifier(n_neighbors=5, n_jobs=1),
+    'DT': DecisionTreeClassifier(criterion='gini', random_state=SEED),
+    'KNN': KNeighborsClassifier(n_neighbors=5, n_jobs=-1),
+    'CART': DecisionTreeClassifier(criterion='gini', max_depth=3, random_state=SEED),
+    'ID3': DecisionTreeClassifier(criterion='entropy', max_depth=3, random_state=SEED),
     'Bagging': BaggingClassifier(
         estimator=DecisionTreeClassifier(max_depth=3, random_state=SEED),
         n_estimators=200,
         random_state=SEED,
-        n_jobs=1
+        n_jobs=-1
     ),
     'AdaBoost': AdaBoostClassifier(
         estimator=DecisionTreeClassifier(max_depth=3, random_state=SEED),
@@ -37,11 +36,9 @@ clfs = {
         n_estimators=200,
         max_depth=3,
         random_state=SEED,
-        n_jobs=1
+        n_jobs=-1
     )
-
 }
-
 
 '''clfs = {
     'MLP' : MLPClassifier(hidden_layer_sizes=(40,20), random_state=SEED), # 13 (variables) -40, 40-20, 20-1
