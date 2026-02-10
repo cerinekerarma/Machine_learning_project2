@@ -19,6 +19,9 @@ from sklearn.ensemble import GradientBoostingClassifier
 from sklearn.metrics import roc_curve, auc, recall_score
 from sklearn.model_selection import cross_val_score
 from sklearn.pipeline import Pipeline
+from sklearn.model_selection import GridSearchCV
+from sklearn.metrics import make_scorer, accuracy_score, precision_score
+
 
 
 SEED = 1
@@ -319,3 +322,46 @@ def expliquer_modele_shap(model, X_train, X_test, nom_cols):
     shap.initjs()
     
     return shap.force_plot(explainer.expected_value, shap_values[0,:], X_test[0,:], feature_names=nom_cols)
+
+def calcul_mon_score(y_true, y_pred):
+    acc = accuracy_score(y_true, y_pred)
+    prec = precision_score(y_true, y_pred)
+    return (acc + prec) / 2
+
+def optimiser_meilleur_modele(X, Y, sorted_idx, nb_vars_optimal):
+    # 1. Sélection du sous-ensemble optimal de variables
+    X_opt = X[:, sorted_idx[:nb_vars_optimal]]
+    
+    # 2. Définition du modèle et de la grille de paramètres
+    # On tune les paramètres clés du Gradient Boosting
+    model = GradientBoostingClassifier(random_state=1)
+    
+    param_grid = {
+        'n_estimators': [100, 200, 300],
+        'learning_rate': [0.01, 0.1, 0.2],
+        'max_depth': [3, 4, 5],
+        'subsample': [0.8, 1.0]
+    }
+    
+    mon_custom_scorer = make_scorer(calcul_mon_score)
+    
+    # 3. Configuration de la recherche (avec Cross-Validation 10-fold)
+    grid_search = GridSearchCV(
+        estimator=model,
+        param_grid=param_grid,
+        scoring=mon_custom_scorer, # Ton critère métier personnalisé
+        cv=KFold(n_splits=10, shuffle=True, random_state=1),
+        n_jobs=-1,
+        verbose=1
+    )
+    
+    # 4. Exécution (On utilise X_opt normalisé ou via Pipeline)
+    # Pour simplifier ici, on peut passer X_opt directement si on l'a normalisé avant
+    grid_search.fit(X_opt, Y)
+    
+    print("\n--- RÉSULTATS DE L'OPTIMISATION ---")
+    print(f"Meilleurs paramètres : {grid_search.best_params_}")
+    print(f"Meilleur score ({nb_vars_optimal} variables) : {grid_search.best_score_:.4f}")
+    
+    return grid_search.best_estimator_
+
