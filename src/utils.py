@@ -3,6 +3,7 @@ np.set_printoptions(threshold=10000,suppress=True)
 import pandas as pd
 import warnings
 import shap
+import pickle
 import matplotlib.pyplot as plt
 
 warnings.filterwarnings('ignore')
@@ -12,7 +13,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.metrics import confusion_matrix, accuracy_score, precision_score, make_scorer
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, FunctionTransformer
 from sklearn.model_selection import cross_val_score, KFold
 from sklearn.ensemble import RandomForestClassifier, BaggingClassifier, AdaBoostClassifier
 from sklearn.ensemble import GradientBoostingClassifier
@@ -56,34 +57,6 @@ clfs = {
     )
 }
 
-
-'''clfs = {
-    'MLP' : MLPClassifier(hidden_layer_sizes=(40,20), random_state=SEED), # 13 (variables) -40, 40-20, 20-1
-    'DT' : DecisionTreeClassifier(criterion='gini', random_state=SEED),
-    'KNN' : KNeighborsClassifier(n_neighbors=5, n_jobs=1),
-    'CART': DecisionTreeClassifier(criterion='gini', max_depth=3, random_state=SEED),
-    'ID3': DecisionTreeClassifier(criterion='entropy', max_depth=3, random_state=SEED),  # ID3 ≈ entropie
-    'MLP': MLPClassifier(hidden_layer_sizes=(20, 10), random_state=SEED, max_iter=1000),
-    'KNN': KNeighborsClassifier(n_neighbors=5, n_jobs=-1),
-    'Bagging': BaggingClassifier(
-        estimator=DecisionTreeClassifier(max_depth=3, random_state=SEED),
-        n_estimators=200,
-        random_state=SEED,
-        n_jobs=-1
-    ),
-    'AdaBoost': AdaBoostClassifier(
-        estimator=DecisionTreeClassifier(max_depth=3, random_state=SEED),
-        n_estimators=200,
-        random_state=SEED
-    ),
-    'RandomForest': RandomForestClassifier(
-        n_estimators=200,
-        max_depth=3,
-        random_state=SEED,
-        n_jobs=-1
-    )
-
-}'''
 
 def preparer_donnees(file_path):
     df = pd.read_csv('../data/'+file_path, sep=';', header=0)
@@ -199,21 +172,18 @@ def normalisation(X_train, X_test):
     return X_train_normalise, X_test_normalise
 
 
-def apprentissage_CV(X, Y, clfs):
-    kf = KFold(n_splits=10, shuffle=True, random_state=SEED)
+def run_classifiers_cv(X, Y, clfs):
+    kf = KFold(n_splits=10, shuffle=True, random_state=SEED) # 
     
     best_score = 0
     best_clf_obj = None
 
     for name in clfs:
-        
-        pipeline = Pipeline([
-            ('scaler', StandardScaler()),
-            ('clf', clfs[name])
-        ])
+        # Le classifieur sans Pipeline de normalisation 
+        clf = clfs[name]
         
         cv_scores = cross_val_score(
-            pipeline, X, Y, 
+            clf, X, Y, 
             cv=kf, 
             scoring=monscore, 
             n_jobs=-1 
@@ -221,12 +191,11 @@ def apprentissage_CV(X, Y, clfs):
         
         mean_score = np.mean(cv_scores)
         std_score = np.std(cv_scores)
-        
-        print(f"Score de {name}: {mean_score:.3f}")
+        print(f"Score de {name}: {mean_score:.3f} +/- {std_score:.3f}")
         
         if mean_score > best_score:
             best_score = mean_score
-            best_clf_obj = clfs[name]
+            best_clf_obj = name
     
     return best_clf_obj, best_score
 
@@ -239,15 +208,14 @@ def afficher_importance_variables(X, y, nom_cols):
     
     nom_cols = np.array(nom_cols)
     
-    # Entrainement global
     clf = RandomForestClassifier(n_estimators=1000, random_state=SEED, n_jobs=-1)
     clf.fit(X, y) 
     
-    #  importances et calcul de l'écart-type (stabilité)
+    #  importances et calcul de l'écart-type 
     importances = clf.feature_importances_
     std = np.std([tree.feature_importances_ for tree in clf.estimators_], axis=0)
     
-    # Tri par importance décroissante
+    
     sorted_idx = np.argsort(importances)[::-1]
     
     # Graphique 
@@ -263,7 +231,6 @@ def afficher_importance_variables(X, y, nom_cols):
     plt.show()
     
     return sorted_idx
-
 
 
 def selection_nombre_variables_cv(X, Y, sorted_idx):
@@ -308,7 +275,6 @@ def selection_nombre_variables_cv(X, Y, sorted_idx):
     return scores_moyens
 
 
-
 def expliquer_modele_shap(model, X_train, X_test, nom_cols):
     
     explainer = shap.TreeExplainer(model)
@@ -333,7 +299,6 @@ def optimiser_meilleur_modele(X, Y, sorted_idx, nb_vars_optimal):
     X_opt = X[:, sorted_idx[:nb_vars_optimal]]
     
     # 2. Définition du modèle et de la grille de paramètres
-    # On tune les paramètres clés du Gradient Boosting
     model = GradientBoostingClassifier(random_state=1)
     
     param_grid = {
@@ -349,19 +314,88 @@ def optimiser_meilleur_modele(X, Y, sorted_idx, nb_vars_optimal):
     grid_search = GridSearchCV(
         estimator=model,
         param_grid=param_grid,
-        scoring=mon_custom_scorer, # Ton critère métier personnalisé
+        scoring=mon_custom_scorer, 
         cv=KFold(n_splits=10, shuffle=True, random_state=1),
         n_jobs=-1,
         verbose=1
     )
     
-    # 4. Exécution (On utilise X_opt normalisé ou via Pipeline)
-    # Pour simplifier ici, on peut passer X_opt directement si on l'a normalisé avant
+
     grid_search.fit(X_opt, Y)
     
-    print("\n--- RÉSULTATS DE L'OPTIMISATION ---")
+    print("\nRÉSULTATS DE L'OPTIMISATION ")
     print(f"Meilleurs paramètres : {grid_search.best_params_}")
     print(f"Meilleur score ({nb_vars_optimal} variables) : {grid_search.best_score_:.4f}")
     
     return grid_search.best_estimator_
 
+
+def selectionner_colonnes(X, indices):
+    """ Sélectionne uniquement les colonnes aux indices donnés """
+    
+    return X[:, indices]
+
+
+def creer_et_sauvegarder_pipeline(X, y, meilleurs_params, indices_top_variables, nom_fichier='pipeline_credit.pkl'):
+    """
+    Crée, ENTRAÎNE et sauvegarde le pipeline final.
+    """
+    # 1. Configuration du sélectionneur de variables
+    
+    selector = FunctionTransformer(selectionner_colonnes, 
+                                   kw_args={'indices': indices_top_variables})
+
+    # 2. Construction du Pipeline
+    mon_pipeline = Pipeline([
+        ('scaler', StandardScaler()),
+        ('feature_selection', selector),
+        ('model', GradientBoostingClassifier(**meilleurs_params))
+    ])
+    
+    # 3. Entraînement 
+    print("Entraînement du pipeline sur l'ensemble des données...")
+    mon_pipeline.fit(X, y) 
+    
+    # 4.  fichier Pickle
+    with open(nom_fichier, 'wb') as f:
+        pickle.dump(mon_pipeline, f)
+        
+    print(f"Pipeline entraîné et sauvegardé dans {nom_fichier}")
+    return mon_pipeline
+
+
+def pipeline_generation_train_test_split(X, Y, nom_cols):
+    """
+    Fonction principale qui orchestre tout le TP.
+    """
+    
+    print("Étape 1 : Comparaison des modèles...")
+    best_clf_name, initial_score = run_classifiers_cv(X, Y, clfs) 
+  
+    print("\nÉtape 2 : Analyse d'importance...")
+    sorted_idx = afficher_importance_variables(X, Y, nom_cols)
+    
+    
+    print("\nÉtape 3 : Optimisation du nombre de variables...")
+    scores_evol = selection_nombre_variables_cv(X, Y, sorted_idx)
+    nb_opti = np.argmax(scores_evol) + 1 
+    print(f"Nombre de variables retenu : {nb_opti}")
+    
+   
+    print("\nÉtape 4 : Tuning des hyperparamètres...")
+    meilleur_modele_objet = optimiser_meilleur_modele(X, Y, sorted_idx, nb_opti)
+    params = meilleur_modele_objet.get_params()
+    
+    
+    print("\nÉtape 5 : Génération et entraînement du Pickle final...")
+    top_vars = sorted_idx[:nb_opti]
+    
+   
+    final_p = creer_et_sauvegarder_pipeline(
+        X, 
+        Y, 
+        meilleurs_params=params, 
+        indices_top_variables=top_vars
+    )
+    
+    return final_p
